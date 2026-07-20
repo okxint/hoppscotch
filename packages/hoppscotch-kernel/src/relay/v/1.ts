@@ -729,11 +729,12 @@ const makeFormDataSerializable = async (
   // @ts-expect-error: `formData.entries` does exist but isn't visible,
   // see `"lib": ["ESNext", "DOM"],` in `tsconfig.json`
   for (const [key, value] of formData.entries()) {
-    if (value instanceof File || value instanceof Blob) {
+    if (value instanceof File) {
+      // Actual file upload — preserve filename and content type.
       const buffer = await value.arrayBuffer()
       const fileEntry: FormDataValue = {
         kind: "file",
-        filename: value instanceof File ? value.name : "unknown",
+        filename: value.name,
         contentType: value.type || "application/octet-stream",
         data: new Uint8Array(buffer),
       }
@@ -742,6 +743,25 @@ const makeFormDataSerializable = async (
         m.get(key)!.push(fileEntry)
       } else {
         m.set(key, [fileEntry])
+      }
+    } else if (value instanceof Blob) {
+      // Plain Blob: a text field whose content type was set explicitly by the
+      // user. Per RFC 7578 §4.2 `filename` MUST NOT appear in Content-Disposition
+      // for non-file parts, so we treat this as a text entry (decoding the bytes
+      // back to a string). The content-type carried by the Blob is intentionally
+      // not forwarded here because the `text` FormDataValue variant has no
+      // content-type field; the per-part Content-Type header is a file-only
+      // concept in the current type system.
+      const text = await value.text()
+      const textEntry: FormDataValue = {
+        kind: "text",
+        value: text,
+      }
+
+      if (m.has(key)) {
+        m.get(key)!.push(textEntry)
+      } else {
+        m.set(key, [textEntry])
       }
     } else {
       const textEntry: FormDataValue = {
